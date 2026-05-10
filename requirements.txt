@@ -1,3 +1,6 @@
 flask
+pandas
+openpyxl
+rapidfuzz
 gunicorn
 twilio
