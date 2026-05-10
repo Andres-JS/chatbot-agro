@@ -6,13 +6,15 @@ from twilio.twiml.messaging_response import MessagingResponse
 
 app = Flask(__name__)
 
-# Cargar Excel
-df = pd.read_excel("insumos.xlsx")
+# ✅ Cargar Excel CON manejo de error
+try:
+    df = pd.read_excel("insumos.xlsx")
+    df.columns = df.columns.astype(str).str.strip().str.upper()
+except Exception as e:
+    df = None
+    print("❌ Error cargando Excel:", e)
 
-# limpiar nombres de columnas
-df.columns = df.columns.astype(str).str.strip().str.upper()
-
-# limpiar texto
+# ✅ Limpiar texto
 def limpiar(texto):
     if pd.isna(texto):
         return ""
@@ -20,13 +22,20 @@ def limpiar(texto):
     texto = re.sub(r'FERTILIZANTES|PLAGUICIDA|HERBICIDA', '', texto)
     return texto.strip().upper()
 
-# detectar columna producto
-col_producto = [c for c in df.columns if "PRODUCTO" in c][0]
+# ✅ Preparar datos si Excel carga
+if df is not None:
+    try:
+        col_producto = [c for c in df.columns if "PRODUCTO" in c][0]
+        df["PRODUCTO LIMPIO"] = df[col_producto].apply(limpiar)
+    except:
+        df = None
+        print("❌ Error columnas en Excel")
 
-df["PRODUCTO LIMPIO"] = df[col_producto].apply(limpiar)
-
-# buscar producto
+# ✅ Buscar producto
 def buscar(pregunta):
+    if df is None:
+        return None
+
     lista = df["PRODUCTO LIMPIO"].tolist()
     mejor = process.extractOne(pregunta.upper(), lista)
 
@@ -35,36 +44,48 @@ def buscar(pregunta):
 
     return None
 
+# ✅ ENDPOINT WHATSAPP (CLAVE)
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp():
-    pregunta = request.form.get("Body")
-
-    fila = buscar(pregunta)
+    pregunta = request.form.get("Body", "")
 
     resp = MessagingResponse()
 
+    # 🔥 PRUEBA BASE (esto garantiza que siempre responda)
+    if pregunta.strip() == "":
+        resp.message("✅ Bot activo pero mensaje vacío")
+        return Response(str(resp), mimetype="application/xml")
+
+    fila = buscar(pregunta)
+
     if fila is None:
-        resp.message("❌ No encontré ese producto")
+        resp.message(f"❌ No encontré el producto: {pregunta}")
     else:
-        respuesta = f"""🌱 {fila['PRODUCTO LIMPIO']}
+        try:
+            respuesta = f"""🌱 {fila.get('PRODUCTO LIMPIO', '')}
 
 🧪 Ingrediente:
-{fila['COMPOSICIÓN/INGREDIENTE ACTIVO']}
+{fila.get('COMPOSICIÓN/INGREDIENTE ACTIVO', 'No disponible')}
 
 💧 Dosis:
-{fila['DOSIS CAPIRO']}
+{fila.get('DOSIS CAPIRO', 'No disponible')}
 
 🐛 Controla:
-{fila['BLANCO BIOLOGICO']}"""
+{fila.get('BLANCO BIOLOGICO', 'No disponible')}"""
+        except:
+            respuesta = "⚠️ Error leyendo datos del producto"
 
         resp.message(respuesta)
 
     return Response(str(resp), mimetype="application/xml")
 
+
+# ✅ Ruta web prueba
 @app.route("/", methods=["GET"])
 def home():
     return "✅ Bot funcionando"
 
+# ✅ Ejecutar servidor
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
